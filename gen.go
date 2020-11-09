@@ -5,35 +5,51 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
 
-const cmdGen = "gen"
+const (
+	cmdGen = "gen"
+
+	format = "20060102"
+)
+
+var weekDays = [...]string{"日", "月", "火", "水", "木", "金", "土"}
 
 func gen(dir string) error {
-	l, err := calc(dir)
+	now, err := time.Parse(format, time.Now().Format(format))
 	if err != nil {
 		return err
 	}
 
-	t, err := template.New("index").Funcs(map[string]interface{}{"raw": func(text string) template.HTML { return template.HTML(text) }}).Parse(indexTempl)
+	l, err := calc(dir, now)
+	if err != nil {
+		return err
+	}
+
+	t, err := template.New("index").Parse(indexTempl)
 	if err != nil {
 		return errInternal{Err: err}
 	}
 
-	if err := t.Execute(os.Stdout, map[string]string{"table": l.html()}); err != nil {
+	args := map[string]interface{}{
+		"header":   l.header(),
+		"body":     l.body(now),
+		"weekDays": weekDays,
+	}
+
+	if err := t.Execute(os.Stdout, args); err != nil {
 		return errInternal{Err: err}
 	}
 
 	return err
 }
 
-func calc(dir string) (log, error) {
-	l := initLog(time.Now())
+func calc(dir string, today time.Time) (log, error) {
+	l := initLog(today)
 
-	if err := filepath.Walk(dir, l.calc); err != nil {
+	if err := filepath.Walk(dir, l.checkLearned); err != nil {
 		return nil, err
 	}
 
@@ -42,21 +58,17 @@ func calc(dir string) (log, error) {
 
 type log map[string]bool
 
-const format = "20060102"
-
 func initLog(today time.Time) log {
-	days := 7*52 + int(today.Weekday())
-
 	l := log{}
 
-	for diff := 0; diff <= days; diff++ {
+	for diff := 0; diff <= 7*52+int(today.Weekday()); diff++ {
 		l[today.AddDate(0, 0, -diff).Format(format)] = false
 	}
 
 	return l
 }
 
-func (l log) calc(path string, info os.FileInfo, err error) error {
+func (l log) checkLearned(path string, info os.FileInfo, err error) error {
 	if err != nil {
 		return err
 	}
@@ -76,85 +88,35 @@ func (l log) calc(path string, info os.FileInfo, err error) error {
 	return nil
 }
 
-var weekDays = [...]string{"日", "月", "火", "水", "木", "金", "土"}
+func (l log) body(today time.Time) [][]*day {
+	m := make([][]*day, 7)
 
-func (l log) html() string {
-	s := make([]*day, 0, len(l))
+	for i := 0; i < 7; i++ {
+		m[i] = make([]*day, (len(l)/7 + 1))
+	}
+
 	for d, learned := range l {
-		s = append(s, &day{d: d, learned: learned})
+		t, _ := time.Parse(format, d)
+
+		index := len(l) - int(today.Sub(t).Hours())/24
+		column := (index + 1) / 7
+		row := (index + 1) % 7
+		m[row][column] = &day{d: d, Learned: learned}
 	}
 
-	sort.Slice(s, func(i, j int) bool {
-		return s[i].d < s[j].d
-	})
+	return m
+}
 
-	t := map[int][]*day{}
-
-	for i, d := range s {
-		t[i/7] = append(t[i/7], d)
+func (l log) header() []string {
+	h := make([]string, 0, (len(l)/7 + 1))
+	for i := 1; i <= (len(l)/7 + 1); i++ {
+		h = append(h, fmt.Sprintf("%02d", i))
 	}
 
-	transposed := make([][]*day, len(t))
-
-	for w, days := range t {
-		transposed[w] = days
-	}
-
-	html := `<table border="1" width="400", height="180" style="font-size: x-small">
-  <thead>
-    <tr>
-      <th> </th>
-`
-
-	for i := 0; i < len(s)/7+1; i++ {
-		html += fmt.Sprintf(`      <th>%02d</th>
-`, i+1)
-	}
-
-	html += `    </tr>
-  </thead>
-  <tbody>
-`
-
-	for k := 0; k < 7; k++ {
-		html += `    <tr>
-`
-
-		html += fmt.Sprintf(`      <td>%s</td>
-`, weekDays[k])
-
-		for j := 0; j < len(s)/7+1; j++ {
-			days := transposed[j]
-			if len(days) <= k {
-				html += `      <td></td>
-`
-
-				continue
-			}
-
-			html += days[k].tableData()
-		}
-
-		html += `    </tr>
-`
-	}
-
-	return html + `
-  </tbody>
-</table>`
+	return h
 }
 
 type day struct {
 	d       string
-	learned bool
-}
-
-func (d *day) tableData() string {
-	if d.learned {
-		return `      <td style="background-color: lime;"> </td>
-`
-	}
-
-	return `      <td> </td>
-`
+	Learned bool
 }
