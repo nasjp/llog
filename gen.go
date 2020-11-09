@@ -20,12 +20,12 @@ var weekDays = [...]string{"日", "月", "火", "水", "木", "金", "土"}
 func gen(dir string) error {
 	now, err := time.Parse(format, time.Now().Format(format))
 	if err != nil {
-		return err
+		return errInternal{Err: err}
 	}
 
 	l, err := calc(dir, now)
 	if err != nil {
-		return err
+		return errInternal{Err: err}
 	}
 
 	t, err := template.New("index").Parse(indexTempl)
@@ -43,14 +43,14 @@ func gen(dir string) error {
 		return errInternal{Err: err}
 	}
 
-	return err
+	return nil
 }
 
 func calc(dir string, today time.Time) (log, error) {
 	l := initLog(today)
 
 	if err := filepath.Walk(dir, l.checkLearned); err != nil {
-		return nil, err
+		return nil, errInternal{Err: err}
 	}
 
 	return l, nil
