@@ -23,7 +23,7 @@ func gen(dir string) error {
 		return errInternal{Err: err}
 	}
 
-	l, err := calc(dir, now)
+	l, err := calcLog(dir, now)
 	if err != nil {
 		return errInternal{Err: err}
 	}
@@ -35,7 +35,7 @@ func gen(dir string) error {
 
 	args := map[string]interface{}{
 		"header":   l.header(),
-		"body":     l.body(now),
+		"body":     l.body(),
 		"weekDays": weekDays,
 	}
 
@@ -46,8 +46,10 @@ func gen(dir string) error {
 	return nil
 }
 
-func calc(dir string, today time.Time) (log, error) {
-	l := initLog(today)
+type log map[string]*day
+
+func calcLog(dir string, today time.Time) (log, error) {
+	l := newLog(today)
 
 	if err := filepath.Walk(dir, l.checkLearned); err != nil {
 		return nil, errInternal{Err: err}
@@ -56,13 +58,12 @@ func calc(dir string, today time.Time) (log, error) {
 	return l, nil
 }
 
-type log map[string]bool
-
-func initLog(today time.Time) log {
+func newLog(today time.Time) log {
 	l := log{}
 
-	for diff := 0; diff <= 7*52+int(today.Weekday()); diff++ {
-		l[today.AddDate(0, 0, -diff).Format(format)] = false
+	for diff, showDays := 0, 7*52+int(today.Weekday()); diff <= showDays; diff++ {
+		yyyymmdd := today.AddDate(0, 0, -diff).Format(format)
+		l[yyyymmdd] = &day{yyyymmdd: yyyymmdd, index: showDays - diff + 1}
 	}
 
 	return l
@@ -77,31 +78,28 @@ func (l log) checkLearned(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
-	d := strings.TrimSuffix(info.Name(), ".md")
+	yyyymmdd := strings.TrimSuffix(info.Name(), ".md")
 
-	if _, err := time.Parse(format, d); err != nil {
+	if _, err := time.Parse(format, yyyymmdd); err != nil {
 		return nil
 	}
 
-	l[d] = true
+	if _, ok := l[yyyymmdd]; ok {
+		l[yyyymmdd].Learned = true
+	}
 
 	return nil
 }
 
-func (l log) body(today time.Time) [][]*day {
+func (l log) body() [][]*day {
 	m := make([][]*day, 7)
 
 	for i := 0; i < 7; i++ {
 		m[i] = make([]*day, (len(l)/7 + 1))
 	}
 
-	for d, learned := range l {
-		t, _ := time.Parse(format, d)
-
-		index := len(l) - int(today.Sub(t).Hours())/24
-		column := (index + 1) / 7
-		row := (index + 1) % 7
-		m[row][column] = &day{d: d, Learned: learned}
+	for _, d := range l {
+		m[(d.index+1)%7][(d.index+1)/7] = d
 	}
 
 	return m
@@ -117,6 +115,7 @@ func (l log) header() []string {
 }
 
 type day struct {
-	d       string
-	Learned bool
+	yyyymmdd string
+	index    int
+	Learned  bool
 }
